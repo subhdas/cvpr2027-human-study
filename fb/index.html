@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mockup Realism Study</title>
+<script src="firebase_transport.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+  .card { background: white; border-radius: 8px; padding: 24px; margin: 16px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  .hidden { display: none; }
+  .images { display: flex; gap: 16px; justify-content: center; margin: 20px 0; }
+  .images img { max-width: 45%; border-radius: 4px; cursor: pointer; border: 3px solid transparent; }
+  .images img:hover { border-color: #007bff; }
+  .images img.selected { border-color: #007bff; }
+  .images img.crop { max-width: 45%; }
+  .source-img { text-align: center; margin-bottom: 16px; }
+  .source-img img { max-width: 300px; border: 2px solid #ddd; border-radius: 4px; }
+  .source-label { font-size: 14px; color: #666; margin-bottom: 8px; }
+  .thumbs { display: flex; gap: 16px; justify-content: center; margin-top: -8px; }
+  .thumbs figure { margin: 0; text-align: center; width: 45%; }
+  .thumbs img { max-width: 180px; border: 1px solid #ddd; border-radius: 4px; opacity: 0.9; }
+  .thumbs figcaption { font-size: 12px; color: #888; }
+  button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 4px; font-size: 16px; cursor: pointer; }
+  button:disabled { background: #ccc; }
+  button:hover:not(:disabled) { background: #0056b3; }
+  .progress { font-size: 14px; color: #666; margin-bottom: 16px; }
+  .question { font-size: 18px; font-weight: 600; margin: 16px 0; text-align: center; }
+  input[type="text"] { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 4px; }
+  .consent { font-size: 14px; line-height: 1.6; }
+  code { background: #eee; padding: 2px 6px; border-radius: 3px; }
+  .submit-status { font-size: 14px; margin: 12px 0; }
+  .submit-status.ok { color: #1a7f37; }
+  .submit-status.fail { color: #b3261e; }
+</style>
+</head>
+<body>
+
+<div id="screen-consent" class="card">
+  <h2>Mockup Image Study — Consent</h2>
+  <div class="consent">
+    <p>You are invited to participate in a research study on AI-generated product mockups.</p>
+    <p><strong>What you'll do:</strong> View pairs of images and choose which one better matches the description. There are 20 comparisons, taking about 6–8 minutes.</p>
+    <p><strong>Risks:</strong> Minimal — you will view images of artwork in room scenes.</p>
+    <p><strong>Confidentiality:</strong> Your responses are anonymous. We record only your Prolific ID (to confirm completion), your choices, and response times. We do not collect names or email addresses. Responses are stored anonymously.</p>
+    <p><strong>Voluntary:</strong> Participation is voluntary. You may withdraw at any time by closing this page; if you stop early, your partial responses will not be used.</p>
+    <p><strong>Contact:</strong> Subhajit Das</p>
+  </div>
+  <label>Your Prolific ID (to confirm completion; we do not collect names or emails):<br>
+    <input type="text" id="prolific-id" placeholder="e.g., 5f8a1b2c3d4e5f6a7b8c9d0e">
+  </label><br><br>
+  <button onclick="startStudy()">I consent — Start</button>
+  <div id="recovery-banner" class="card hidden">
+    <p>We found unsaved responses from an earlier session on this device.</p>
+    <button onclick="recoverySave()">Save them now</button>
+    <button onclick="recoveryDownload()">Download CSV</button>
+    <button onclick="recoveryDiscard()">Discard</button>
+  </div>
+</div>
+
+<div id="screen-trial" class="card hidden">
+  <div class="progress" id="progress"></div>
+  <div id="source-container" class="source-img hidden">
+    <div class="source-label">Original artwork:</div>
+    <img id="source-img" src="" alt="Original artwork">
+  </div>
+  <div class="question" id="question"></div>
+  <div class="images">
+    <img id="img-left" src="" alt="Option A" onclick="selectImage('left')">
+    <img id="img-right" src="" alt="Option B" onclick="selectImage('right')">
+  </div>
+  <div id="thumbs-container" class="thumbs hidden">
+    <figure><img id="thumb-left" src="" alt="Full scene, left option"><figcaption>Full scene (context)</figcaption></figure>
+    <figure><img id="thumb-right" src="" alt="Full scene, right option"><figcaption>Full scene (context)</figcaption></figure>
+  </div>
+  <div style="text-align: center; margin-top: 16px;">
+    <button id="btn-next" onclick="nextTrial()" disabled>Select an image above, then continue</button>
+  </div>
+</div>
+
+<div id="screen-done" class="card hidden">
+  <h2>Thank you!</h2>
+  <p id="submit-status" class="submit-status">Saving your responses…</p>
+  <div id="completion-block">
+  <p>Please return to Prolific and enter the completion code:</p>
+  <p style="font-size: 20px; font-weight: 700; text-align: center;"><code id="completion-code"></code></p>
+  <p>You can now return to Prolific and enter the completion code above to finish.</p>
+  </div>
+  <button id="btn-retry-submit" class="hidden" onclick="retrySubmit()">Retry</button>
+  <button onclick="downloadCSV()">Download Responses (CSV) — backup copy</button>
+  <p style="font-size: 12px; color: #666; margin-top: 16px;">Rater ID: <span id="rater-id-display"></span></p>
+</div>
+
+<script>
+// ---- Study configuration (filled in by build_study_page.py) ----
+// PHASE: "pilot" (slots R001..R005) or "main" (slots R001..R050).
+// SUBMIT_ENDPOINT: deployed Google Apps Script web-app URL (/exec).
+// ALL_RATERS: {rater_id: [trials...]} for every slot in this phase.
+const PHASE = "pilot";
+const SUBMIT_ENDPOINT = "";
+const ALL_RATERS = {"R001": [{"trial_id": 2, "rater_id": "R001", "artwork_id": "MET_0225", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0225.jpg", "right_image": "v1_MET_0225.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 0}, {"trial_id": 16, "rater_id": "R001", "artwork_id": "MET_0052", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "gpt", "right_method": "v2", "left_image": "crop_gpt_MET_0052.jpg", "right_image": "crop_v2_MET_0052.jpg", "left_thumb": "gpt_MET_0052.jpg", "right_thumb": "v2_MET_0052.jpg", "source_image": "source_MET_0052.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 1}, {"trial_id": 9, "rater_id": "R001", "artwork_id": "MET_0079", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0079.jpg", "right_image": "v2_MET_0079.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 2}, {"trial_id": 8, "rater_id": "R001", "artwork_id": "MET_0190", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0190.jpg", "right_image": "v2_MET_0190.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 3}, {"trial_id": 0, "rater_id": "R001", "artwork_id": "MET_0217", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0217.jpg", "right_image": "v1_MET_0217.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 4}, {"trial_id": 6, "rater_id": "R001", "artwork_id": "MET_0203", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0203.jpg", "right_image": "v0_MET_0203.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 5}, {"trial_id": 18, "rater_id": "R001", "artwork_id": "MET_0009", "task": "realism", "comparison": "attention_check", "is_primary": false, "left_method": "v2", "right_method": "v2_degraded", "left_image": "v2_MET_0009.jpg", "right_image": "v2_degraded_MET_0009.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": "v2", "is_attention_check": true, "scene": "main", "trial_order": 6}, {"trial_id": 13, "rater_id": "R001", "artwork_id": "MET_0095", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "grok", "right_method": "v2", "left_image": "crop_grok_MET_0095.jpg", "right_image": "crop_v2_MET_0095.jpg", "left_thumb": "grok_MET_0095.jpg", "right_thumb": "v2_MET_0095.jpg", "source_image": "source_MET_0095.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 7}, {"trial_id": 11, "rater_id": "R001", "artwork_id": "MET_0141", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0141.jpg", "right_image": "v0_MET_0141.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 8}, {"trial_id": 7, "rater_id": "R001", "artwork_id": "MET_0257", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0257.jpg", "right_image": "v0_MET_0257.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 9}, {"trial_id": 1, "rater_id": "R001", "artwork_id": "MET_0287", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0287.jpg", "right_image": "v1_MET_0287.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 10}, {"trial_id": 14, "rater_id": "R001", "artwork_id": "MET_0267", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "v2", "right_method": "grok", "left_image": "crop_v2_MET_0267.jpg", "right_image": "crop_grok_MET_0267.jpg", "left_thumb": "v2_MET_0267.jpg", "right_thumb": "grok_MET_0267.jpg", "source_image": "source_MET_0267.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 11}, {"trial_id": 19, "rater_id": "R001", "artwork_id": "MET_0053", "task": "fidelity", "comparison": "attention_check", "is_primary": false, "left_method": "crop_v2", "right_method": "crop_v2_degraded", "left_image": "crop_v2_MET_0053.jpg", "right_image": "crop_v2_degraded_MET_0053.jpg", "left_thumb": "v2_MET_0053.jpg", "right_thumb": "v2_degraded_MET_0053.jpg", "source_image": "source_MET_0053.jpg", "expected_method": "crop_v2", "is_attention_check": true, "scene": "main", "trial_order": 12}, {"trial_id": 15, "rater_id": "R001", "artwork_id": "MET_0085", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0085.jpg", "right_image": "crop_gpt_MET_0085.jpg", "left_thumb": "v2_MET_0085.jpg", "right_thumb": "gpt_MET_0085.jpg", "source_image": "source_MET_0085.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 13}, {"trial_id": 10, "rater_id": "R001", "artwork_id": "MET_0008", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0008.jpg", "right_image": "v0_MET_0008.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 14}, {"trial_id": 17, "rater_id": "R001", "artwork_id": "MET_0127", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "gpt", "right_method": "v2", "left_image": "crop_gpt_MET_0127.jpg", "right_image": "crop_v2_MET_0127.jpg", "left_thumb": "gpt_MET_0127.jpg", "right_thumb": "v2_MET_0127.jpg", "source_image": "source_MET_0127.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 15}, {"trial_id": 12, "rater_id": "R001", "artwork_id": "MET_0202", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "grok", "right_method": "v2", "left_image": "crop_grok_MET_0202.jpg", "right_image": "crop_v2_MET_0202.jpg", "left_thumb": "grok_MET_0202.jpg", "right_thumb": "v2_MET_0202.jpg", "source_image": "source_MET_0202.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 16}, {"trial_id": 5, "rater_id": "R001", "artwork_id": "MET_0080", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0080.jpg", "right_image": "v2_MET_0080.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 17}, {"trial_id": 3, "rater_id": "R001", "artwork_id": "MET_0244", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0244.jpg", "right_image": "v1_MET_0244.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 18}, {"trial_id": 4, "rater_id": "R001", "artwork_id": "MET_0075", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0075.jpg", "right_image": "v2_MET_0075.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 19}], "R002": [{"trial_id": 9, "rater_id": "R002", "artwork_id": "MET_0287", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0287.jpg", "right_image": "v2_MET_0287.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 0}, {"trial_id": 1, "rater_id": "R002", "artwork_id": "MET_0203", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0203.jpg", "right_image": "v1_MET_0203.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 1}, {"trial_id": 8, "rater_id": "R002", "artwork_id": "MET_0095", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0095.jpg", "right_image": "v0_MET_0095.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 2}, {"trial_id": 14, "rater_id": "R002", "artwork_id": "MET_0122", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "v2", "right_method": "grok", "left_image": "crop_v2_MET_0122.jpg", "right_image": "crop_grok_MET_0122.jpg", "left_thumb": "v2_MET_0122.jpg", "right_thumb": "grok_MET_0122.jpg", "source_image": "source_MET_0122.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 3}, {"trial_id": 3, "rater_id": "R002", "artwork_id": "MET_0190", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0190.jpg", "right_image": "v2_MET_0190.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 4}, {"trial_id": 5, "rater_id": "R002", "artwork_id": "MET_0052", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0052.jpg", "right_image": "v2_MET_0052.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 5}, {"trial_id": 18, "rater_id": "R002", "artwork_id": "MET_0127", "task": "realism", "comparison": "attention_check", "is_primary": false, "left_method": "v2_degraded", "right_method": "v2", "left_image": "v2_degraded_MET_0127.jpg", "right_image": "v2_MET_0127.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": "v2", "is_attention_check": true, "scene": "main", "trial_order": 6}, {"trial_id": 7, "rater_id": "R002", "artwork_id": "MET_0202", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0202.jpg", "right_image": "v2_MET_0202.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 7}, {"trial_id": 6, "rater_id": "R002", "artwork_id": "MET_0075", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0075.jpg", "right_image": "v0_MET_0075.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 8}, {"trial_id": 15, "rater_id": "R002", "artwork_id": "MET_0128", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0128.jpg", "right_image": "crop_gpt_MET_0128.jpg", "left_thumb": "v2_MET_0128.jpg", "right_thumb": "gpt_MET_0128.jpg", "source_image": "source_MET_0128.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 9}, {"trial_id": 2, "rater_id": "R002", "artwork_id": "MET_0292", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0292.jpg", "right_image": "v2_MET_0292.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 10}, {"trial_id": 17, "rater_id": "R002", "artwork_id": "MET_0225", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "gpt", "right_method": "v2", "left_image": "crop_gpt_MET_0225.jpg", "right_image": "crop_v2_MET_0225.jpg", "left_thumb": "gpt_MET_0225.jpg", "right_thumb": "v2_MET_0225.jpg", "source_image": "source_MET_0225.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 11}, {"trial_id": 19, "rater_id": "R002", "artwork_id": "MET_0270", "task": "fidelity", "comparison": "attention_check", "is_primary": false, "left_method": "crop_v2_degraded", "right_method": "crop_v2", "left_image": "crop_v2_degraded_MET_0270.jpg", "right_image": "crop_v2_MET_0270.jpg", "left_thumb": "v2_MET_0270.jpg", "right_thumb": "v2_degraded_MET_0270.jpg", "source_image": "source_MET_0270.jpg", "expected_method": "crop_v2", "is_attention_check": true, "scene": "main", "trial_order": 12}, {"trial_id": 16, "rater_id": "R002", "artwork_id": "MET_0141", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0141.jpg", "right_image": "crop_gpt_MET_0141.jpg", "left_thumb": "v2_MET_0141.jpg", "right_thumb": "gpt_MET_0141.jpg", "source_image": "source_MET_0141.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 13}, {"trial_id": 10, "rater_id": "R002", "artwork_id": "MET_0173", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0173.jpg", "right_image": "v2_MET_0173.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 14}, {"trial_id": 4, "rater_id": "R002", "artwork_id": "MET_0079", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0079.jpg", "right_image": "v2_MET_0079.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 15}, {"trial_id": 0, "rater_id": "R002", "artwork_id": "MET_0008", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0008.jpg", "right_image": "v2_MET_0008.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 16}, {"trial_id": 12, "rater_id": "R002", "artwork_id": "MET_0244", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "v2", "right_method": "grok", "left_image": "crop_v2_MET_0244.jpg", "right_image": "crop_grok_MET_0244.jpg", "left_thumb": "v2_MET_0244.jpg", "right_thumb": "grok_MET_0244.jpg", "source_image": "source_MET_0244.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 17}, {"trial_id": 13, "rater_id": "R002", "artwork_id": "MET_0080", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "v2", "right_method": "grok", "left_image": "crop_v2_MET_0080.jpg", "right_image": "crop_grok_MET_0080.jpg", "left_thumb": "v2_MET_0080.jpg", "right_thumb": "grok_MET_0080.jpg", "source_image": "source_MET_0080.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 18}, {"trial_id": 11, "rater_id": "R002", "artwork_id": "MET_0193", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0193.jpg", "right_image": "v0_MET_0193.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 19}], "R003": [{"trial_id": 10, "rater_id": "R003", "artwork_id": "MET_0053", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0053.jpg", "right_image": "v2_MET_0053.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 0}, {"trial_id": 2, "rater_id": "R003", "artwork_id": "MET_0173", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0173.jpg", "right_image": "v2_MET_0173.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 1}, {"trial_id": 4, "rater_id": "R003", "artwork_id": "MET_0193", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0193.jpg", "right_image": "v2_MET_0193.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 2}, {"trial_id": 6, "rater_id": "R003", "artwork_id": "MET_0217", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0217.jpg", "right_image": "v2_MET_0217.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 3}, {"trial_id": 1, "rater_id": "R003", "artwork_id": "MET_0128", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0128.jpg", "right_image": "v1_MET_0128.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 4}, {"trial_id": 12, "rater_id": "R003", "artwork_id": "MET_0008", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "grok", "right_method": "v2", "left_image": "crop_grok_MET_0008.jpg", "right_image": "crop_v2_MET_0008.jpg", "left_thumb": "grok_MET_0008.jpg", "right_thumb": "v2_MET_0008.jpg", "source_image": "source_MET_0008.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 5}, {"trial_id": 18, "rater_id": "R003", "artwork_id": "MET_0085", "task": "realism", "comparison": "attention_check", "is_primary": false, "left_method": "v2", "right_method": "v2_degraded", "left_image": "v2_MET_0085.jpg", "right_image": "v2_degraded_MET_0085.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": "v2", "is_attention_check": true, "scene": "main", "trial_order": 6}, {"trial_id": 5, "rater_id": "R003", "artwork_id": "MET_0257", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0257.jpg", "right_image": "v2_MET_0257.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 7}, {"trial_id": 14, "rater_id": "R003", "artwork_id": "MET_0203", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "grok", "right_method": "v2", "left_image": "crop_grok_MET_0203.jpg", "right_image": "crop_v2_MET_0203.jpg", "left_thumb": "grok_MET_0203.jpg", "right_thumb": "v2_MET_0203.jpg", "source_image": "source_MET_0203.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 8}, {"trial_id": 16, "rater_id": "R003", "artwork_id": "MET_0202", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0202.jpg", "right_image": "crop_gpt_MET_0202.jpg", "left_thumb": "v2_MET_0202.jpg", "right_thumb": "gpt_MET_0202.jpg", "source_image": "source_MET_0202.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 9}, {"trial_id": 9, "rater_id": "R003", "artwork_id": "MET_0292", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0292.jpg", "right_image": "v2_MET_0292.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 10}, {"trial_id": 7, "rater_id": "R003", "artwork_id": "MET_0080", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0080.jpg", "right_image": "v2_MET_0080.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 11}, {"trial_id": 19, "rater_id": "R003", "artwork_id": "MET_0052", "task": "fidelity", "comparison": "attention_check", "is_primary": false, "left_method": "crop_v2", "right_method": "crop_v2_degraded", "left_image": "crop_v2_MET_0052.jpg", "right_image": "crop_v2_degraded_MET_0052.jpg", "left_thumb": "v2_MET_0052.jpg", "right_thumb": "v2_degraded_MET_0052.jpg", "source_image": "source_MET_0052.jpg", "expected_method": "crop_v2", "is_attention_check": true, "scene": "main", "trial_order": 12}, {"trial_id": 11, "rater_id": "R003", "artwork_id": "MET_0086", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0086.jpg", "right_image": "v0_MET_0086.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 13}, {"trial_id": 0, "rater_id": "R003", "artwork_id": "MET_0127", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0127.jpg", "right_image": "v2_MET_0127.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 14}, {"trial_id": 3, "rater_id": "R003", "artwork_id": "MET_0267", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0267.jpg", "right_image": "v1_MET_0267.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 15}, {"trial_id": 8, "rater_id": "R003", "artwork_id": "MET_0225", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0225.jpg", "right_image": "v2_MET_0225.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 16}, {"trial_id": 13, "rater_id": "R003", "artwork_id": "MET_0075", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "grok", "right_method": "v2", "left_image": "crop_grok_MET_0075.jpg", "right_image": "crop_v2_MET_0075.jpg", "left_thumb": "grok_MET_0075.jpg", "right_thumb": "v2_MET_0075.jpg", "source_image": "source_MET_0075.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 17}, {"trial_id": 17, "rater_id": "R003", "artwork_id": "MET_0287", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "gpt", "right_method": "v2", "left_image": "crop_gpt_MET_0287.jpg", "right_image": "crop_v2_MET_0287.jpg", "left_thumb": "gpt_MET_0287.jpg", "right_thumb": "v2_MET_0287.jpg", "source_image": "source_MET_0287.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 18}, {"trial_id": 15, "rater_id": "R003", "artwork_id": "MET_0079", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0079.jpg", "right_image": "crop_gpt_MET_0079.jpg", "left_thumb": "v2_MET_0079.jpg", "right_thumb": "gpt_MET_0079.jpg", "source_image": "source_MET_0079.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 19}], "R004": [{"trial_id": 13, "rater_id": "R004", "artwork_id": "MET_0193", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "v2", "right_method": "grok", "left_image": "crop_v2_MET_0193.jpg", "right_image": "crop_grok_MET_0193.jpg", "left_thumb": "v2_MET_0193.jpg", "right_thumb": "grok_MET_0193.jpg", "source_image": "source_MET_0193.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 0}, {"trial_id": 9, "rater_id": "R004", "artwork_id": "MET_0267", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0267.jpg", "right_image": "v2_MET_0267.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 1}, {"trial_id": 16, "rater_id": "R004", "artwork_id": "MET_0080", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0080.jpg", "right_image": "crop_gpt_MET_0080.jpg", "left_thumb": "v2_MET_0080.jpg", "right_thumb": "gpt_MET_0080.jpg", "source_image": "source_MET_0080.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 2}, {"trial_id": 7, "rater_id": "R004", "artwork_id": "MET_0127", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0127.jpg", "right_image": "v0_MET_0127.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 3}, {"trial_id": 1, "rater_id": "R004", "artwork_id": "MET_0122", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0122.jpg", "right_image": "v2_MET_0122.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 4}, {"trial_id": 8, "rater_id": "R004", "artwork_id": "MET_0195", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0195.jpg", "right_image": "v0_MET_0195.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 5}, {"trial_id": 18, "rater_id": "R004", "artwork_id": "MET_0287", "task": "realism", "comparison": "attention_check", "is_primary": false, "left_method": "v2", "right_method": "v2_degraded", "left_image": "v2_MET_0287.jpg", "right_image": "v2_degraded_MET_0287.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": "v2", "is_attention_check": true, "scene": "main", "trial_order": 6}, {"trial_id": 10, "rater_id": "R004", "artwork_id": "MET_0085", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0085.jpg", "right_image": "v0_MET_0085.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 7}, {"trial_id": 12, "rater_id": "R004", "artwork_id": "MET_0225", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "grok", "right_method": "v2", "left_image": "crop_grok_MET_0225.jpg", "right_image": "crop_v2_MET_0225.jpg", "left_thumb": "grok_MET_0225.jpg", "right_thumb": "v2_MET_0225.jpg", "source_image": "source_MET_0225.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 8}, {"trial_id": 4, "rater_id": "R004", "artwork_id": "MET_0053", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0053.jpg", "right_image": "v2_MET_0053.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 9}, {"trial_id": 5, "rater_id": "R004", "artwork_id": "MET_0086", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0086.jpg", "right_image": "v2_MET_0086.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 10}, {"trial_id": 0, "rater_id": "R004", "artwork_id": "MET_0095", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0095.jpg", "right_image": "v1_MET_0095.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 11}, {"trial_id": 19, "rater_id": "R004", "artwork_id": "MET_0257", "task": "fidelity", "comparison": "attention_check", "is_primary": false, "left_method": "crop_v2_degraded", "right_method": "crop_v2", "left_image": "crop_v2_degraded_MET_0257.jpg", "right_image": "crop_v2_MET_0257.jpg", "left_thumb": "v2_MET_0257.jpg", "right_thumb": "v2_degraded_MET_0257.jpg", "source_image": "source_MET_0257.jpg", "expected_method": "crop_v2", "is_attention_check": true, "scene": "main", "trial_order": 12}, {"trial_id": 6, "rater_id": "R004", "artwork_id": "MET_0052", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0052.jpg", "right_image": "v2_MET_0052.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 13}, {"trial_id": 14, "rater_id": "R004", "artwork_id": "MET_0190", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "grok", "right_method": "v2", "left_image": "crop_grok_MET_0190.jpg", "right_image": "crop_v2_MET_0190.jpg", "left_thumb": "grok_MET_0190.jpg", "right_thumb": "v2_MET_0190.jpg", "source_image": "source_MET_0190.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 14}, {"trial_id": 11, "rater_id": "R004", "artwork_id": "MET_0270", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0270.jpg", "right_image": "v2_MET_0270.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 15}, {"trial_id": 3, "rater_id": "R004", "artwork_id": "MET_0196", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0196.jpg", "right_image": "v1_MET_0196.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 16}, {"trial_id": 2, "rater_id": "R004", "artwork_id": "MET_0062", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0062.jpg", "right_image": "v2_MET_0062.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 17}, {"trial_id": 17, "rater_id": "R004", "artwork_id": "MET_0203", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0203.jpg", "right_image": "crop_gpt_MET_0203.jpg", "left_thumb": "v2_MET_0203.jpg", "right_thumb": "gpt_MET_0203.jpg", "source_image": "source_MET_0203.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 18}, {"trial_id": 15, "rater_id": "R004", "artwork_id": "MET_0008", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0008.jpg", "right_image": "crop_gpt_MET_0008.jpg", "left_thumb": "v2_MET_0008.jpg", "right_thumb": "gpt_MET_0008.jpg", "source_image": "source_MET_0008.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 19}], "R005": [{"trial_id": 11, "rater_id": "R005", "artwork_id": "MET_0225", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0225.jpg", "right_image": "v2_MET_0225.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 0}, {"trial_id": 7, "rater_id": "R005", "artwork_id": "MET_0196", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0196.jpg", "right_image": "v0_MET_0196.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 1}, {"trial_id": 16, "rater_id": "R005", "artwork_id": "MET_0267", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0267.jpg", "right_image": "crop_gpt_MET_0267.jpg", "left_thumb": "v2_MET_0267.jpg", "right_thumb": "gpt_MET_0267.jpg", "source_image": "source_MET_0267.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 2}, {"trial_id": 9, "rater_id": "R005", "artwork_id": "MET_0244", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0244.jpg", "right_image": "v2_MET_0244.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 3}, {"trial_id": 8, "rater_id": "R005", "artwork_id": "MET_0122", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0122.jpg", "right_image": "v0_MET_0122.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 4}, {"trial_id": 14, "rater_id": "R005", "artwork_id": "MET_0173", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "v2", "right_method": "grok", "left_image": "crop_v2_MET_0173.jpg", "right_image": "crop_grok_MET_0173.jpg", "left_thumb": "v2_MET_0173.jpg", "right_thumb": "grok_MET_0173.jpg", "source_image": "source_MET_0173.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 5}, {"trial_id": 18, "rater_id": "R005", "artwork_id": "MET_0008", "task": "realism", "comparison": "attention_check", "is_primary": false, "left_method": "v2", "right_method": "v2_degraded", "left_image": "v2_MET_0008.jpg", "right_image": "v2_degraded_MET_0008.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": "v2", "is_attention_check": true, "scene": "main", "trial_order": 6}, {"trial_id": 17, "rater_id": "R005", "artwork_id": "MET_0193", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0193.jpg", "right_image": "crop_gpt_MET_0193.jpg", "left_thumb": "v2_MET_0193.jpg", "right_thumb": "gpt_MET_0193.jpg", "source_image": "source_MET_0193.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 7}, {"trial_id": 0, "rater_id": "R005", "artwork_id": "MET_0202", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0202.jpg", "right_image": "v1_MET_0202.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 8}, {"trial_id": 12, "rater_id": "R005", "artwork_id": "MET_0052", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "grok", "right_method": "v2", "left_image": "crop_grok_MET_0052.jpg", "right_image": "crop_v2_MET_0052.jpg", "left_thumb": "grok_MET_0052.jpg", "right_thumb": "v2_MET_0052.jpg", "source_image": "source_MET_0052.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 9}, {"trial_id": 6, "rater_id": "R005", "artwork_id": "MET_0062", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v0", "right_method": "v2", "left_image": "v0_MET_0062.jpg", "right_image": "v2_MET_0062.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 10}, {"trial_id": 13, "rater_id": "R005", "artwork_id": "MET_0053", "task": "fidelity", "comparison": "v2_vs_grok", "is_primary": false, "left_method": "grok", "right_method": "v2", "left_image": "crop_grok_MET_0053.jpg", "right_image": "crop_v2_MET_0053.jpg", "left_thumb": "grok_MET_0053.jpg", "right_thumb": "v2_MET_0053.jpg", "source_image": "source_MET_0053.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 11}, {"trial_id": 19, "rater_id": "R005", "artwork_id": "MET_0203", "task": "fidelity", "comparison": "attention_check", "is_primary": false, "left_method": "crop_v2_degraded", "right_method": "crop_v2", "left_image": "crop_v2_degraded_MET_0203.jpg", "right_image": "crop_v2_MET_0203.jpg", "left_thumb": "v2_MET_0203.jpg", "right_thumb": "v2_degraded_MET_0203.jpg", "source_image": "source_MET_0203.jpg", "expected_method": "crop_v2", "is_attention_check": true, "scene": "main", "trial_order": 12}, {"trial_id": 10, "rater_id": "R005", "artwork_id": "MET_0128", "task": "realism", "comparison": "v2_vs_v0", "is_primary": true, "left_method": "v2", "right_method": "v0", "left_image": "v2_MET_0128.jpg", "right_image": "v0_MET_0128.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 13}, {"trial_id": 3, "rater_id": "R005", "artwork_id": "MET_0270", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0270.jpg", "right_image": "v2_MET_0270.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 14}, {"trial_id": 15, "rater_id": "R005", "artwork_id": "MET_0075", "task": "fidelity", "comparison": "v2_vs_gpt", "is_primary": false, "left_method": "v2", "right_method": "gpt", "left_image": "crop_v2_MET_0075.jpg", "right_image": "crop_gpt_MET_0075.jpg", "left_thumb": "v2_MET_0075.jpg", "right_thumb": "gpt_MET_0075.jpg", "source_image": "source_MET_0075.jpg", "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 15}, {"trial_id": 5, "rater_id": "R005", "artwork_id": "MET_0195", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0195.jpg", "right_image": "v1_MET_0195.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 16}, {"trial_id": 1, "rater_id": "R005", "artwork_id": "MET_0085", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v2", "right_method": "v1", "left_image": "v2_MET_0085.jpg", "right_image": "v1_MET_0085.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 17}, {"trial_id": 2, "rater_id": "R005", "artwork_id": "MET_0009", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0009.jpg", "right_image": "v2_MET_0009.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 18}, {"trial_id": 4, "rater_id": "R005", "artwork_id": "MET_0141", "task": "realism", "comparison": "v2_vs_v1", "is_primary": true, "left_method": "v1", "right_method": "v2", "left_image": "v1_MET_0141.jpg", "right_image": "v2_MET_0141.jpg", "left_thumb": null, "right_thumb": null, "source_image": null, "expected_method": null, "is_attention_check": false, "scene": "main", "trial_order": 19}]};
+const BACKEND = "firebase";
+const FIREBASE_CONFIG = {"apiKey": "AIzaSyBpeiMVCoWKSiLvPDHXU5BsdgkZv6WriHU", "authDomain": "mockartcvpr.firebaseapp.com", "projectId": "mockartcvpr", "storageBucket": "mockartcvpr.firebasestorage.app", "messagingSenderId": "140627028205", "appId": "1:140627028205:web:ab7e929cd1b98ea32844e4"};
+// Set this to the completion code configured in Prolific before launch.
+const COMPLETION_CODE = "CVPR20DONE";
+const STIMULI_DIR = "stimuli20";
+
+let TRIALS = [];
+let raterId = null;
+let prolificId = '';
+let currentTrial = 0;
+let responses = [];
+let trialStartTime = 0;
+let trialStartUnix = 0;
+let selected = null;
+let submitted = false;
+let submissionUuid = null;
+let assignmentDone = false;
+let assignmentMode = 'server';
+let fbTransport = null;
+let fbInitPromise = null;
+let lastFbPayload = null;
+let recoveredPayload = null;
+
+const QUESTIONS = {
+  realism: "Which image looks more like a real photograph of framed artwork hanging in this room?",
+  fidelity: "Which mockup more faithfully reproduces the colors and visual appearance of the original artwork shown above?"
+};
+
+function urlParam(name) {
+  try { return new URLSearchParams(window.location.search).get(name) || ''; }
+  catch (e) { return ''; }
+}
+
+// djb2 string hash -> slot index. Fallback assignment when the server
+// assignment endpoint is unreachable; deterministic per Prolific ID.
+function hashSlot(prolificId, nSlots) {
+  let h = 5381;
+  const s = String(prolificId || 'anonymous');
+  for (let i = 0; i < s.length; i++) h = ((h * 33) + s.charCodeAt(i)) >>> 0;
+  return h % nSlots;
+}
+
+function slotIds() { return Object.keys(ALL_RATERS).sort(); }
+
+// Assign a rater slot via the backend (JSONP: Apps Script web apps do not
+// return CORS headers, so fetch(mode:'cors') fails). Falls back to
+// hash-of-Prolific-ID, then to a random slot, if the endpoint is
+// unreachable within 5 s. The backend assignment is idempotent per
+// Prolific ID, so a refresh returns the same slot.
+function fetchAssignment(phase, prolificId, cb) {
+  const slots = slotIds();
+  const done = function (slot) { cb(slot || slots[hashSlot(prolificId, slots.length)]); };
+  if (!SUBMIT_ENDPOINT || SUBMIT_ENDPOINT.indexOf('PASTE_DEPLOYED_URL') !== -1) {
+    done(null);
+    return;
+  }
+  const cbName = 'assignCb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+  let finished = false;
+  const cleanup = function () {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    try { script.remove(); } catch (e) { /* ignore */ }
+    try { delete window[cbName]; } catch (e) { /* ignore */ }
+  };
+  const timer = setTimeout(function () { cleanup(); done(null); }, 5000);
+  window[cbName] = function (data) {
+    cleanup();
+    if (data && data.ok && ALL_RATERS[data.rater_id]) done(data.rater_id);
+    else done(null);
+  };
+  const script = document.createElement('script');
+  script.onerror = function () { cleanup(); done(null); };
+  script.src = SUBMIT_ENDPOINT + '?action=assign&phase=' + encodeURIComponent(phase)
+    + '&prolific_id=' + encodeURIComponent(prolificId || 'anonymous')
+    + '&callback=' + cbName;
+  document.head.appendChild(script);
+}
+
+// ---- Firebase glue (runs only when BACKEND === 'firebase') ----
+function initFirebaseTransport() {
+  if (fbTransport) return Promise.resolve(fbTransport);
+  if (fbInitPromise) return fbInitPromise;
+  fbInitPromise = (async function () {
+    const appMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js');
+    const authMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
+    const fsMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js');
+    const app = appMod.initializeApp(FIREBASE_CONFIG);
+    const auth = authMod.getAuth(app);
+    const db = fsMod.getFirestore(app);
+    const sdk = {
+      signInAnonymously: async function () {
+        const cred = await authMod.signInAnonymously(auth);
+        return { uid: cred.user.uid };
+      },
+      getDoc: function (ref) { return fsMod.getDoc(ref); },
+      setDoc: function (ref, data) { return fsMod.setDoc(ref, data); },
+      runTransaction: function (fn) {
+        return fsMod.runTransaction(db, function (tx) {
+          return fn({
+            get: function (r) { return tx.get(r); },
+            set: function (r, d) { tx.set(r, d); },
+            update: function (r, d) { tx.update(r, d); }
+          });
+        });
+      },
+      doc: function (path) { return fsMod.doc(db, path); }
+    };
+    fbTransport = window.FirebaseTransport.create({
+      sdk: sdk, storage: window.localStorage,
+      now: function () { return Date.now(); }
+    });
+    return fbTransport;
+  })();
+  return fbInitPromise;
+}
+
+function currentPayload() {
+  return {
+    phase: PHASE,
+    prolific_id: prolificId,
+    rater_id: raterId,
+    submission_uuid: submissionUuid,
+    assignment_mode: assignmentMode,
+    responses: responses
+  };
+}
+
+function assignTrialsFirebase(cb) {
+  const fallbackSlot = function () {
+    const slots = slotIds();
+    return slots[hashSlot(prolificId, slots.length)];
+  };
+  initFirebaseTransport()
+    .then(function (transport) {
+      return transport.assign(PHASE, prolificId, slotIds(), fallbackSlot);
+    })
+    .then(function (result) {
+      raterId = result.rater_id;
+      assignmentMode = result.mode;
+      TRIALS = ALL_RATERS[raterId];
+      assignmentDone = true;
+      document.getElementById('rater-id-display').textContent = raterId;
+      cb();
+    })
+    .catch(function () {
+      raterId = fallbackSlot();
+      assignmentMode = 'fallback';
+      TRIALS = ALL_RATERS[raterId];
+      assignmentDone = true;
+      document.getElementById('rater-id-display').textContent = raterId;
+      cb();
+    });
+}
+
+function assignTrials(cb) {
+  if (BACKEND === 'firebase') {
+    assignTrialsFirebase(cb);
+    return;
+  }
+  fetchAssignment(PHASE, prolificId, function (slot) {
+    raterId = slot;
+    TRIALS = ALL_RATERS[slot];
+    assignmentDone = true;
+    document.getElementById('rater-id-display').textContent = raterId;
+    cb();
+  });
+}
+
+// On load: prefill the Prolific ID from the URL (Prolific appends
+// ?PROLIFIC_PID={{%PROLIFIC_PID%}}) and assign a rater slot in the
+// background so trials are ready when consent is given.
+document.addEventListener('DOMContentLoaded', function () {
+  const pid = urlParam('PROLIFIC_PID');
+  if (pid) {
+    prolificId = pid;
+    document.getElementById('prolific-id').value = pid;
+  }
+  submissionUuid = 'sub_' + Date.now() + '_' + Math.floor(Math.random() * 1e9);
+  if (BACKEND === 'firebase') {
+    const block = document.getElementById('completion-block');
+    if (block) block.classList.add('hidden');
+    initFirebaseTransport().then(function (transport) {
+      try {
+        const pidForCheck = prolificId || document.getElementById('prolific-id').value.trim();
+        if (pidForCheck) {
+          const pending = transport.loadPending(PHASE, pidForCheck);
+          if (pending && pending.responses && pending.responses.length > 0) {
+            recoveredPayload = pending;
+            document.getElementById('recovery-banner').classList.remove('hidden');
+          }
+        }
+      } catch (e) { /* ignore */ }
+    }).catch(function () { /* ignore */ });
+  }
+  assignTrials(function () { /* trials ready */ });
+});
+
+function startStudy() {
+  const entered = document.getElementById('prolific-id').value.trim();
+  // If slot assignment is still in flight (slow endpoint), wait for it
+  // instead of starting with an empty trial list: poll until assignmentDone
+  // (JSONP timeout is 5 s, so this resolves within ~6 s), then proceed.
+  // Without this guard a fast clicker on a slow network would get 0 trials.
+  if (!assignmentDone) {
+    const btn = document.querySelector('#screen-consent button');
+    if (btn) btn.textContent = 'Loading your comparisons…';
+    let waited = 0;
+    const poll = setInterval(function () {
+      waited += 200;
+      if (assignmentDone || waited >= 6000) {
+        clearInterval(poll);
+        if (!assignmentDone) {
+          // Last-resort synchronous hash fallback (same as fetchAssignment).
+          const slots = slotIds();
+          raterId = slots[hashSlot(prolificId, slots.length)];
+          TRIALS = ALL_RATERS[raterId];
+          assignmentDone = true;
+        }
+        if (btn) btn.textContent = 'I consent — Start';
+        startStudy();
+      }
+    }, 200);
+    return;
+  }
+  if (entered && entered !== prolificId) {
+    // Participant typed/edited an ID after assignment: re-assign so the
+    // slot matches the ID that will be recorded with the responses.
+    prolificId = entered;
+    assignmentDone = false;
+    assignTrials(function () {
+      document.getElementById('screen-consent').classList.add('hidden');
+      document.getElementById('screen-trial').classList.remove('hidden');
+      if (BACKEND !== 'firebase') document.getElementById('completion-code').textContent = COMPLETION_CODE;
+      showTrial();
+    });
+    return;
+  }
+  prolificId = entered || prolificId || 'anonymous';
+  document.getElementById('screen-consent').classList.add('hidden');
+  document.getElementById('screen-trial').classList.remove('hidden');
+  if (BACKEND !== 'firebase') document.getElementById('completion-code').textContent = COMPLETION_CODE;
+  showTrial();
+}
+
+function showTrial() {
+  if (currentTrial >= TRIALS.length) {
+    document.getElementById('screen-trial').classList.add('hidden');
+    document.getElementById('screen-done').classList.remove('hidden');
+    submitResponses();
+    return;
+  }
+  const t = TRIALS[currentTrial];
+  document.getElementById('progress').textContent = `Comparison ${currentTrial + 1} of ${TRIALS.length}`;
+  document.getElementById('question').textContent = QUESTIONS[t.task];
+
+  // Source image for fidelity task (displayed prominently above)
+  const srcContainer = document.getElementById('source-container');
+  if (t.task === 'fidelity') {
+    srcContainer.classList.remove('hidden');
+    document.getElementById('source-img').src = `${STIMULI_DIR}/${t.source_image}`;
+  } else {
+    srcContainer.classList.add('hidden');
+  }
+
+  // Main options: full-scene images for realism, normalized artwork-region
+  // crops (600x600) for fidelity.
+  document.getElementById('img-left').src = `${STIMULI_DIR}/${t.left_image}`;
+  document.getElementById('img-right').src = `${STIMULI_DIR}/${t.right_image}`;
+  document.getElementById('img-left').classList.toggle('crop', t.task === 'fidelity');
+  document.getElementById('img-right').classList.toggle('crop', t.task === 'fidelity');
+
+  // Optional small full-scene thumbnails for fidelity context.
+  const thumbs = document.getElementById('thumbs-container');
+  if (t.task === 'fidelity' && t.left_thumb && t.right_thumb) {
+    thumbs.classList.remove('hidden');
+    document.getElementById('thumb-left').src = `${STIMULI_DIR}/${t.left_thumb}`;
+    document.getElementById('thumb-right').src = `${STIMULI_DIR}/${t.right_thumb}`;
+  } else {
+    thumbs.classList.add('hidden');
+  }
+
+  document.getElementById('img-left').classList.remove('selected');
+  document.getElementById('img-right').classList.remove('selected');
+  document.getElementById('btn-next').disabled = true;
+  document.getElementById('btn-next').textContent = 'Select an image above, then continue';
+  selected = null;
+  trialStartTime = Date.now();
+  trialStartUnix = Date.now();
+}
+
+function selectImage(side) {
+  selected = side;
+  document.getElementById('img-left').classList.toggle('selected', side === 'left');
+  document.getElementById('img-right').classList.toggle('selected', side === 'right');
+  document.getElementById('btn-next').disabled = false;
+  document.getElementById('btn-next').textContent = 'Continue →';
+}
+
+function nextTrial() {
+  if (!selected) return;
+  const t = TRIALS[currentTrial];
+  const rt = Date.now() - trialStartTime;
+  const chosen_method = selected === 'left' ? t.left_method : t.right_method;
+  responses.push({
+    rater_id: raterId,
+    prolific_id: prolificId,
+    trial_order: currentTrial,
+    trial_id: t.trial_id,
+    artwork_id: t.artwork_id,
+    task: t.task,
+    comparison: t.comparison,
+    is_primary: t.is_primary,
+    is_attention_check: t.is_attention_check,
+    expected_method: t.expected_method,
+    left_method: t.left_method,
+    right_method: t.right_method,
+    chosen_side: selected,
+    chosen_method: chosen_method,
+    response_time_ms: rt,
+    trial_start_unix_ms: trialStartUnix,
+  });
+  if (BACKEND === 'firebase') {
+    const payloadToSave = currentPayload();
+    if (fbTransport) {
+      try { fbTransport.savePending(payloadToSave); } catch (e) { /* ignore */ }
+    } else {
+      initFirebaseTransport().then(function (t) {
+        try { t.savePending(payloadToSave); } catch (e) { /* ignore */ }
+      }).catch(function () { /* ignore */ });
+    }
+  }
+  currentTrial++;
+  showTrial();
+}
+
+// Submit responses to the backend. Uses fetch(mode:'no-cors') because
+// Apps Script web apps do not return CORS headers. IMPORTANT: a no-cors
+// response is opaque — the client CANNOT tell a server 200 from a server
+// 500. "Saved" here means "request sent without a network error" after up
+// to 3 attempts. The Google Sheet is the source of truth: the researcher
+// verifies submissions landed there. The CSV download below remains as a
+// participant-side backup. The server dedupes on submissionUuid, so a
+// retried POST never double-inserts.
+async function fbSubmitFlow(payloadOverride) {
+  const statusEl = document.getElementById('submit-status');
+  const retryBtn = document.getElementById('btn-retry-submit');
+  const payload = payloadOverride || currentPayload();
+  lastFbPayload = payload;
+  let transport;
+  try {
+    transport = await initFirebaseTransport();
+  } catch (e) {
+    statusEl.textContent = 'Your responses could NOT be saved. They are preserved on this page and on this device — please use the Retry button below. If saving still fails, download the CSV file and send it to the researcher as a message on Prolific so your work is not lost.';
+    statusEl.className = 'submit-status fail';
+    if (retryBtn) retryBtn.classList.remove('hidden');
+    return;
+  }
+  // Preserve on this device BEFORE attempting to save.
+  try { transport.savePending(payload); } catch (e) { /* ignore */ }
+  statusEl.textContent = 'Saving your responses…';
+  statusEl.className = 'submit-status';
+  if (retryBtn) retryBtn.classList.add('hidden');
+  let result;
+  try {
+    result = await transport.submit(payload);
+  } catch (e) {
+    result = { state: 'failed' };
+  }
+  if (result.state === 'confirmed') {
+    statusEl.textContent = `Your ${payload.responses.length} responses have been saved. Thank you!`;
+    statusEl.className = 'submit-status ok';
+    document.getElementById('completion-code').textContent = COMPLETION_CODE;
+    const block = document.getElementById('completion-block');
+    if (block) block.classList.remove('hidden');
+    try { transport.clearPending(payload.phase, payload.prolific_id); } catch (e) { /* ignore */ }
+    submitted = true;
+  } else if (result.state === 'duplicate') {
+    statusEl.textContent = 'Our records show responses were already submitted for this Prolific ID. If you completed this study earlier, please use the completion code shown at that time. If you believe this is an error, please contact the researcher via Prolific.';
+    statusEl.className = 'submit-status fail';
+    try { transport.clearPending(payload.phase, payload.prolific_id); } catch (e) { /* ignore */ }
+  } else {
+    statusEl.textContent = 'Your responses could NOT be saved. They are preserved on this page and on this device — please use the Retry button below. If saving still fails, download the CSV file and send it to the researcher as a message on Prolific so your work is not lost.';
+    statusEl.className = 'submit-status fail';
+    if (retryBtn) retryBtn.classList.remove('hidden');
+  }
+}
+
+function retrySubmit() {
+  if (lastFbPayload) fbSubmitFlow(lastFbPayload);
+  else fbSubmitFlow();
+}
+
+function recoverySave() {
+  if (!recoveredPayload) return;
+  document.getElementById('recovery-banner').classList.add('hidden');
+  document.getElementById('screen-consent').classList.add('hidden');
+  document.getElementById('screen-trial').classList.add('hidden');
+  document.getElementById('screen-done').classList.remove('hidden');
+  if (recoveredPayload.rater_id) {
+    document.getElementById('rater-id-display').textContent = recoveredPayload.rater_id;
+  }
+  fbSubmitFlow(recoveredPayload);
+}
+
+function recoveryDownload() {
+  if (!recoveredPayload) return;
+  downloadCSVData(recoveredPayload.responses, recoveredPayload.rater_id);
+}
+
+function recoveryDiscard() {
+  if (recoveredPayload) {
+    if (fbTransport) {
+      try { fbTransport.clearPending(recoveredPayload.phase, recoveredPayload.prolific_id); } catch (e) { /* ignore */ }
+    }
+    try { window.localStorage.removeItem('cvpr_pending_' + recoveredPayload.phase + '_' + recoveredPayload.prolific_id); } catch (e) { /* ignore */ }
+    recoveredPayload = null;
+  }
+  document.getElementById('recovery-banner').classList.add('hidden');
+}
+
+async function submitResponses() {
+  if (submitted) return;
+  if (BACKEND === 'firebase') {
+    await fbSubmitFlow();
+    return;
+  }
+  submitted = true;
+  const statusEl = document.getElementById('submit-status');
+  const payload = {
+    phase: PHASE,
+    rater_id: raterId,
+    prolific_id: prolificId,
+    submission_uuid: submissionUuid,
+    responses: responses,
+  };
+  if (!SUBMIT_ENDPOINT || SUBMIT_ENDPOINT.indexOf('PASTE_DEPLOYED_URL') !== -1) {
+    statusEl.textContent = 'Automatic save is not configured for this preview build — please use the Download button below as your backup copy.';
+    statusEl.className = 'submit-status fail';
+    return;
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await fetch(SUBMIT_ENDPOINT, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(payload),
+      });
+      statusEl.textContent = `Your ${responses.length} responses have been sent. Thank you!`;
+      statusEl.className = 'submit-status ok';
+      return;
+    } catch (e) {
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+    }
+  }
+  statusEl.textContent = 'Automatic save failed after 3 attempts — please click Download below to keep a backup copy of your responses.';
+  statusEl.className = 'submit-status fail';
+}
+
+function downloadCSVData(rowsData, rid) {
+  if (!rowsData || !rowsData.length) return;
+  const headers = Object.keys(rowsData[0]);
+  const rows = [headers.join(',')];
+  for (const r of rowsData) {
+    rows.push(headers.map(h => `"${r[h]}"`).join(','));
+  }
+  const blob = new Blob([rows.join('\n')], {type: 'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `responses_${rid}.csv`;
+  a.click();
+}
+
+function downloadCSV() {
+  downloadCSVData(responses, raterId);
+}
+</script>
+</body>
+</html>
