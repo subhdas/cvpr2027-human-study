@@ -6,32 +6,66 @@
 <title>Mockup Realism Study</title>
 <script src="firebase_transport.js"></script>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5; color: #1a1a1a; font-size: 16px; }
   .card { background: white; border-radius: 8px; padding: 24px; margin: 16px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-  .hidden { display: none; }
-  .images { display: flex; gap: 16px; justify-content: center; margin: 20px 0; }
-  .images img { max-width: 45%; border-radius: 4px; cursor: pointer; border: 3px solid transparent; }
-  .images img:hover { border-color: #007bff; }
-  .images img.selected { border-color: #007bff; }
-  .images img.crop { max-width: 45%; }
-  .source-img { text-align: center; margin-bottom: 16px; }
-  .source-img img { max-width: 300px; border: 2px solid #ddd; border-radius: 4px; }
-  .source-label { font-size: 14px; color: #666; margin-bottom: 8px; }
-  .thumbs { display: flex; gap: 16px; justify-content: center; margin-top: -8px; }
-  .thumbs figure { margin: 0; text-align: center; width: 45%; }
-  .thumbs img { max-width: 180px; border: 1px solid #ddd; border-radius: 4px; opacity: 0.9; }
-  .thumbs figcaption { font-size: 12px; color: #888; }
-  button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 4px; font-size: 16px; cursor: pointer; }
+  .hidden { display: none !important; }
+  /* ---- trial header ---- */
+  .progress-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .progress { font-size: 14px; color: #666; }
+  .progress-bar { height: 4px; background: #e6e6e6; border-radius: 2px; margin: 8px 0 4px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #007bff; width: 0%; transition: width 0.25s ease; }
+  .question { font-size: 19px; font-weight: 600; margin: 14px 0 6px; text-align: center; line-height: 1.35; }
+  /* ---- media boxes: fixed aspect (set inline per trial) -> no layout shift ---- */
+  .media-box { position: relative; width: 100%; background: #ececec; border-radius: 6px; overflow: hidden; }
+  .media-box img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  .zoom-btn { position: absolute; right: 8px; bottom: 8px; z-index: 2; width: 40px; height: 40px; padding: 0; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; font-size: 19px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+  .zoom-btn:hover:not(:disabled) { background: rgba(0,0,0,0.75); }
+  /* ---- comparison options ---- */
+  .images { display: flex; gap: 16px; justify-content: center; margin: 16px 0 4px; }
+  .option { flex: 1 1 0; min-width: 0; max-width: 430px; }
+  .option .media-box { border: 3px solid transparent; cursor: pointer; }
+  .option .media-box:hover { border-color: #9ec5fe; }
+  .option.chosen .media-box { border-color: #007bff; }
+  .option-tag { text-align: center; font-size: 14px; color: #666; margin-top: 6px; }
+  .option.chosen .option-tag { color: #007bff; font-weight: 700; }
+  /* ---- A/B toggle (single-image layout) ---- */
+  .ab-toggle { display: flex; gap: 0; margin: 14px 0 0; border: 1.5px solid #007bff; border-radius: 8px; overflow: hidden; }
+  .ab-toggle button { flex: 1; background: #fff; color: #007bff; border: none; border-radius: 0; padding: 12px 8px; font-size: 16px; min-height: 48px; }
+  .ab-toggle button.viewing { background: #e7f1ff; font-weight: 600; }
+  .ab-toggle button.chosen { background: #007bff; color: #fff; font-weight: 700; }
+  /* ---- source (fidelity) ---- */
+  .source-img { margin: 8px auto 4px; max-width: 340px; }
+  .source-img .media-box { border: 2px solid #ddd; }
+  .source-label { font-size: 14px; color: #666; margin-bottom: 8px; text-align: center; }
+  /* ---- fidelity context thumbnails (built only when the trial has them) ---- */
+  .thumbs { display: flex; gap: 16px; justify-content: center; margin-top: 10px; }
+  .thumbs figure { margin: 0; text-align: center; flex: 0 1 200px; }
+  .thumbs .media-box { border: 1px solid #ddd; }
+  .thumbs figcaption { font-size: 12px; color: #888; margin-top: 4px; }
+  button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 16px; cursor: pointer; min-height: 48px; }
   button:disabled { background: #ccc; }
   button:hover:not(:disabled) { background: #0056b3; }
-  .progress { font-size: 14px; color: #666; margin-bottom: 16px; }
-  .question { font-size: 18px; font-weight: 600; margin: 16px 0; text-align: center; }
-  input[type="text"] { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 4px; }
+  input[type="text"] { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; }
   .consent { font-size: 14px; line-height: 1.6; }
   code { background: #eee; padding: 2px 6px; border-radius: 3px; }
   .submit-status { font-size: 14px; margin: 12px 0; }
   .submit-status.ok { color: #1a7f37; }
   .submit-status.fail { color: #b3261e; }
+  /* ---- lightbox ---- */
+  .lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.92); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+  .lightbox img { max-width: 96vw; max-height: 96vh; object-fit: contain; }
+  /* ---- narrow screens: single full-width option + sticky header ---- */
+  @media (max-width: 767px) {
+    body { padding: 8px; }
+    .card { padding: 16px 14px; margin: 8px 0; }
+    .trial-head { position: sticky; top: 0; z-index: 5; background: white; padding: 6px 0 8px; margin-top: -6px; }
+    .question { font-size: 17px; }
+    .images { gap: 0; }
+    .option { max-width: none; }
+    .option.not-viewed { display: none; }
+    .source-img { max-width: 300px; }
+  }
 </style>
 </head>
 <body>
@@ -59,23 +93,48 @@
 </div>
 
 <div id="screen-trial" class="card hidden">
-  <div class="progress" id="progress"></div>
+  <div class="trial-head">
+    <div class="progress-row">
+      <div class="progress" id="progress"></div>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="question" id="question"></div>
+  </div>
   <div id="source-container" class="source-img hidden">
     <div class="source-label">Original artwork:</div>
-    <img id="source-img" src="" alt="Original artwork">
+    <div class="media-box" id="source-box">
+      <img id="source-img" src="" alt="Original artwork">
+      <button type="button" class="zoom-btn" id="zoom-source" aria-label="Zoom original artwork">⤢</button>
+    </div>
   </div>
-  <div class="question" id="question"></div>
-  <div class="images">
-    <img id="img-left" src="" alt="Option A" onclick="selectImage('left')">
-    <img id="img-right" src="" alt="Option B" onclick="selectImage('right')">
+  <div class="ab-toggle hidden" id="ab-toggle">
+    <button type="button" id="toggle-left" onclick="viewOption('left')">Option 1</button>
+    <button type="button" id="toggle-right" onclick="viewOption('right')">Option 2</button>
   </div>
-  <div id="thumbs-container" class="thumbs hidden">
-    <figure><img id="thumb-left" src="" alt="Full scene, left option"><figcaption>Full scene (context)</figcaption></figure>
-    <figure><img id="thumb-right" src="" alt="Full scene, right option"><figcaption>Full scene (context)</figcaption></figure>
+  <div class="images" id="images">
+    <div class="option" id="option-left">
+      <div class="media-box" id="box-left" onclick="onOptionTap('left')">
+        <img id="img-left" src="" alt="Option A">
+        <button type="button" class="zoom-btn" onclick="openLightboxSide('left'); event.stopPropagation();" aria-label="Zoom Option 1">⤢</button>
+      </div>
+      <div class="option-tag">Option 1</div>
+    </div>
+    <div class="option" id="option-right">
+      <div class="media-box" id="box-right" onclick="onOptionTap('right')">
+        <img id="img-right" src="" alt="Option B">
+        <button type="button" class="zoom-btn" onclick="openLightboxSide('right'); event.stopPropagation();" aria-label="Zoom Option 2">⤢</button>
+      </div>
+      <div class="option-tag">Option 2</div>
+    </div>
   </div>
+  <div id="thumbs-container" class="thumbs hidden"></div>
   <div style="text-align: center; margin-top: 16px;">
     <button id="btn-next" onclick="nextTrial()" disabled>Select an image above, then continue</button>
   </div>
+</div>
+
+<div id="lightbox" class="lightbox hidden" onclick="closeLightbox()">
+  <img id="lightbox-img" src="" alt="">
 </div>
 
 <div id="screen-done" class="card hidden">
@@ -294,7 +353,27 @@ document.addEventListener('DOMContentLoaded', function () {
       } catch (e) { /* ignore */ }
     }).catch(function () { /* ignore */ });
   }
-  assignTrials(function () { /* trials ready */ });
+  // Viewer wiring: an image that fails to load hides its media box (no
+  // broken-image glyphs); a loaded image refines its box's aspect ratio.
+  const boxOf = { 'img-left': 'box-left', 'img-right': 'box-right', 'source-img': 'source-box' };
+  for (const [imgId, boxId] of Object.entries(boxOf)) {
+    const im = document.getElementById(imgId);
+    const box = document.getElementById(boxId);
+    im.addEventListener('error', function () { box.style.display = 'none'; });
+    im.addEventListener('load', function () {
+      if (im.naturalWidth) box.style.aspectRatio = im.naturalWidth + ' / ' + im.naturalHeight;
+    });
+  }
+  document.getElementById('zoom-source').addEventListener('click', function () {
+    const t = TRIALS[currentTrial];
+    if (t && t.source_image) openLightboxUrl(`${STIMULI_DIR}/${t.source_image}`);
+  });
+  window.addEventListener('resize', function () { if (TRIALS.length) applyViewer(); });
+  assignTrials(function () {
+    // trials ready: warm the first comparisons' images during consent.
+    if (TRIALS[0]) preloadTrial(TRIALS[0]);
+    if (TRIALS[1]) preloadTrial(TRIALS[1]);
+  });
 });
 
 function startStudy() {
@@ -344,6 +423,39 @@ function startStudy() {
   showTrial();
 }
 
+// ---- Comparison viewer (dual side-by-side / single A-B) ----
+// Presentation only: `selected` keeps its original meaning (the side the
+// participant chose) and nextTrial() records from it exactly as before.
+let viewSide = 'left';
+const imgMeta = {};    // filename -> {w, h} once loaded (for aspect boxes)
+const imgPreload = {}; // filename -> HTMLImageElement
+
+function isSingleLayout() {
+  return window.matchMedia('(max-width: 767px)').matches;
+}
+
+function preloadFile(fn) {
+  if (!fn || imgPreload[fn]) return;
+  const im = new Image();
+  im.onload = function () { imgMeta[fn] = { w: im.naturalWidth, h: im.naturalHeight }; };
+  im.src = `${STIMULI_DIR}/${fn}`;
+  imgPreload[fn] = im;
+}
+
+function preloadTrial(t) {
+  if (!t) return;
+  preloadFile(t.left_image);
+  preloadFile(t.right_image);
+  if (t.source_image) preloadFile(t.source_image);
+  if (t.left_thumb) preloadFile(t.left_thumb);
+  if (t.right_thumb) preloadFile(t.right_thumb);
+}
+
+function aspectFor(fn, fallback) {
+  const m = fn && imgMeta[fn];
+  return m ? (m.w + ' / ' + m.h) : fallback;
+}
+
 function showTrial() {
   if (currentTrial >= TRIALS.length) {
     document.getElementById('screen-trial').classList.add('hidden');
@@ -353,50 +465,150 @@ function showTrial() {
   }
   const t = TRIALS[currentTrial];
   document.getElementById('progress').textContent = `Comparison ${currentTrial + 1} of ${TRIALS.length}`;
+  document.getElementById('progress-fill').style.width =
+    (TRIALS.length ? (currentTrial / TRIALS.length) * 100 : 0) + '%';
   document.getElementById('question').textContent = QUESTIONS[t.task];
 
   // Source image for fidelity task (displayed prominently above)
   const srcContainer = document.getElementById('source-container');
+  const srcBox = document.getElementById('source-box');
+  srcBox.style.display = '';
   if (t.task === 'fidelity') {
     srcContainer.classList.remove('hidden');
+    srcBox.style.aspectRatio = aspectFor(t.source_image, '4 / 3');
     document.getElementById('source-img').src = `${STIMULI_DIR}/${t.source_image}`;
   } else {
     srcContainer.classList.add('hidden');
   }
 
   // Main options: full-scene images for realism, normalized artwork-region
-  // crops (600x600) for fidelity.
+  // crops (600x600) for fidelity. Media boxes carry the images' aspect
+  // ratio (known from preloading) so nothing shifts while images load.
+  const pairFallback = t.task === 'fidelity' ? '1 / 1' : '4 / 3';
+  const boxL = document.getElementById('box-left');
+  const boxR = document.getElementById('box-right');
+  boxL.style.display = '';
+  boxR.style.display = '';
+  boxL.style.aspectRatio = aspectFor(t.left_image, pairFallback);
+  boxR.style.aspectRatio = aspectFor(t.right_image, pairFallback);
   document.getElementById('img-left').src = `${STIMULI_DIR}/${t.left_image}`;
   document.getElementById('img-right').src = `${STIMULI_DIR}/${t.right_image}`;
-  document.getElementById('img-left').classList.toggle('crop', t.task === 'fidelity');
-  document.getElementById('img-right').classList.toggle('crop', t.task === 'fidelity');
 
   // Optional small full-scene thumbnails for fidelity context.
-  const thumbs = document.getElementById('thumbs-container');
-  if (t.task === 'fidelity' && t.left_thumb && t.right_thumb) {
-    thumbs.classList.remove('hidden');
-    document.getElementById('thumb-left').src = `${STIMULI_DIR}/${t.left_thumb}`;
-    document.getElementById('thumb-right').src = `${STIMULI_DIR}/${t.right_thumb}`;
-  } else {
-    thumbs.classList.add('hidden');
-  }
+  buildThumbs(t);
 
-  document.getElementById('img-left').classList.remove('selected');
-  document.getElementById('img-right').classList.remove('selected');
+  selected = null;
+  viewSide = 'left';
+  applyViewer();
   document.getElementById('btn-next').disabled = true;
   document.getElementById('btn-next').textContent = 'Select an image above, then continue';
-  selected = null;
   trialStartTime = Date.now();
   trialStartUnix = Date.now();
+
+  // Preload the next trial's images so it appears without waiting or shift.
+  if (currentTrial + 1 < TRIALS.length) preloadTrial(TRIALS[currentTrial + 1]);
+}
+
+// Build the fidelity context thumbnails ONLY for trials that actually
+// carry them — realism trials never get thumbnail elements (previously a
+// CSS specificity bug left the empty thumbnail row visible with
+// broken-image glyphs under every realism comparison).
+function buildThumbs(t) {
+  const container = document.getElementById('thumbs-container');
+  container.innerHTML = '';
+  if (!(t.left_thumb && t.right_thumb)) {
+    container.classList.add('hidden');
+    return;
+  }
+  const pair = [[t.left_thumb, 'Full scene, left option'],
+                [t.right_thumb, 'Full scene, right option']];
+  for (const [fn, alt] of pair) {
+    const fig = document.createElement('figure');
+    const box = document.createElement('div');
+    box.className = 'media-box';
+    box.style.aspectRatio = aspectFor(fn, '4 / 3');
+    const img = document.createElement('img');
+    img.alt = alt;
+    img.onerror = function () { fig.style.display = 'none'; };
+    img.src = `${STIMULI_DIR}/${fn}`;
+    const zoom = document.createElement('button');
+    zoom.type = 'button';
+    zoom.className = 'zoom-btn';
+    zoom.textContent = '⤢';
+    zoom.setAttribute('aria-label', 'Zoom: ' + alt);
+    zoom.onclick = function () { openLightboxUrl(`${STIMULI_DIR}/${fn}`); };
+    box.appendChild(img);
+    box.appendChild(zoom);
+    const cap = document.createElement('figcaption');
+    cap.textContent = 'Full scene (context)';
+    fig.appendChild(box);
+    fig.appendChild(cap);
+    container.appendChild(fig);
+  }
+  container.classList.remove('hidden');
+}
+
+function applyViewer() {
+  const single = isSingleLayout();
+  document.getElementById('ab-toggle').classList.toggle('hidden', !single);
+  for (const side of ['left', 'right']) {
+    document.getElementById('option-' + side).classList.toggle(
+      'not-viewed', single && side !== viewSide);
+    document.getElementById('option-' + side).classList.toggle(
+      'chosen', selected === side);
+    const tg = document.getElementById('toggle-' + side);
+    tg.classList.toggle('viewing', single && side === viewSide && selected !== side);
+    tg.classList.toggle('chosen', single && selected === side);
+  }
+}
+
+function markSelected(side) {
+  selected = side;
+  document.getElementById('btn-next').disabled = false;
+  document.getElementById('btn-next').textContent = 'Continue →';
+  applyViewer();
 }
 
 function selectImage(side) {
-  selected = side;
-  document.getElementById('img-left').classList.toggle('selected', side === 'left');
-  document.getElementById('img-right').classList.toggle('selected', side === 'right');
-  document.getElementById('btn-next').disabled = false;
-  document.getElementById('btn-next').textContent = 'Continue →';
+  markSelected(side);
 }
+
+// Single layout: show one option full-width and choose it. Reached from
+// the Option 1 / Option 2 toggle and by tapping the displayed image
+// (which flips to the other option).
+function viewOption(side) {
+  viewSide = side;
+  markSelected(side);
+}
+
+function onOptionTap(side) {
+  if (isSingleLayout()) {
+    viewOption(side === 'left' ? 'right' : 'left');
+    return;
+  }
+  selectImage(side);
+}
+
+// ---- Lightbox (tap/click or Esc to close; never changes the selection) ----
+function openLightboxUrl(url) {
+  document.getElementById('lightbox-img').src = url;
+  document.getElementById('lightbox').classList.remove('hidden');
+}
+
+function openLightboxSide(side) {
+  const t = TRIALS[currentTrial];
+  if (!t) return;
+  openLightboxUrl(`${STIMULI_DIR}/${side === 'left' ? t.left_image : t.right_image}`);
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.add('hidden');
+  document.getElementById('lightbox-img').src = '';
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closeLightbox();
+});
 
 function nextTrial() {
   if (!selected) return;
