@@ -24,7 +24,7 @@
   /* ---- comparison options ---- */
   .images { display: flex; gap: 16px; justify-content: center; margin: 16px 0 4px; }
   .option { flex: 1 1 0; min-width: 0; max-width: 430px; }
-  .option .media-box { border: 3px solid transparent; cursor: pointer; }
+  .option .media-box { border: 3px solid transparent; cursor: zoom-in; }
   .option .media-box:hover { border-color: #9ec5fe; }
   .option.chosen .media-box { border-color: #007bff; }
   .option-tag { text-align: center; font-size: 14px; color: #666; margin-top: 6px; }
@@ -36,6 +36,11 @@
   .option.chosen .checkbox::after { content: '✓'; }
   .choose-label { font-size: 16px; color: #333; }
   .option.chosen .choose-label { color: #007bff; font-weight: 700; }
+  /* ---- per-trial actions: Back / Submit ---- */
+  .actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
+  .actions .btn-back { background: #fff; color: #007bff; border: 1.5px solid #007bff; }
+  .actions .btn-back:hover:not(:disabled) { background: #e7f1ff; }
+  .actions button:disabled { opacity: 0.45; cursor: default; }
   .answer-hint { text-align: center; font-size: 14px; color: #555; margin: 2px 0 0; }
   /* ---- source (fidelity) ---- */
   .source-img { margin: 8px auto 4px; max-width: 340px; }
@@ -67,6 +72,7 @@
     .images { flex-direction: column; gap: 22px; }
     .option { max-width: none; }
     .source-img { max-width: 300px; }
+    .actions { position: sticky; bottom: 0; background: #fff; padding: 10px 0 6px; z-index: 4; }
   }
 </style>
 </head>
@@ -101,38 +107,42 @@
     </div>
     <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
     <div class="question" id="question"></div>
-    <div class="answer-hint">Tap an image or its checkbox to answer — the box checks ✓ and moves to the next comparison. Use ⤢ to zoom without answering.</div>
+    <div class="answer-hint">Tap an image to zoom in. Tap a checkbox to choose an option, then press Submit.</div>
   </div>
   <div id="source-container" class="source-img hidden">
     <div class="source-label">Original artwork:</div>
-    <div class="media-box" id="source-box">
+    <div class="media-box" id="source-box" onclick="openLightboxSource()">
       <img id="source-img" src="" alt="Original artwork">
       <button type="button" class="zoom-btn" id="zoom-source" aria-label="Zoom original artwork">⤢</button>
     </div>
   </div>
   <div class="images" id="images">
-    <div class="option" id="option-left" onclick="onOptionTap('left')">
-      <div class="media-box" id="box-left">
+    <div class="option" id="option-left">
+      <div class="media-box" id="box-left" onclick="openLightboxSide('left')">
         <img id="img-left" src="" alt="Option A">
         <button type="button" class="zoom-btn" onclick="openLightboxSide('left'); event.stopPropagation();" aria-label="Zoom Option 1">⤢</button>
       </div>
-      <div class="choose-row">
+      <div class="choose-row" onclick="toggleSelect('left')">
         <span class="checkbox" id="checkbox-left"></span>
         <span class="choose-label">Option 1</span>
       </div>
       <div class="ctx-thumb hidden" id="thumb-left"></div>
     </div>
-    <div class="option" id="option-right" onclick="onOptionTap('right')">
-      <div class="media-box" id="box-right">
+    <div class="option" id="option-right">
+      <div class="media-box" id="box-right" onclick="openLightboxSide('right')">
         <img id="img-right" src="" alt="Option B">
         <button type="button" class="zoom-btn" onclick="openLightboxSide('right'); event.stopPropagation();" aria-label="Zoom Option 2">⤢</button>
       </div>
-      <div class="choose-row">
+      <div class="choose-row" onclick="toggleSelect('right')">
         <span class="checkbox" id="checkbox-right"></span>
         <span class="choose-label">Option 2</span>
       </div>
       <div class="ctx-thumb hidden" id="thumb-right"></div>
     </div>
+  </div>
+  <div class="actions">
+    <button type="button" id="btn-back" class="btn-back" onclick="goBack()">← Back</button>
+    <button type="button" id="btn-submit" onclick="nextTrial()" disabled>Submit</button>
   </div>
 </div>
 
@@ -454,7 +464,7 @@ function aspectFor(fn, fallback) {
   return m ? (m.w + ' / ' + m.h) : fallback;
 }
 
-function showTrial() {
+function showTrial(preselectSide) {
   if (currentTrial >= TRIALS.length) {
     document.getElementById('screen-trial').classList.add('hidden');
     document.getElementById('screen-done').classList.remove('hidden');
@@ -495,9 +505,9 @@ function showTrial() {
   // Optional small full-scene thumbnails for fidelity context.
   buildThumbs(t);
 
-  selected = null;
-  advancing = false;
+  selected = preselectSide || null;
   applyViewer();
+  updateActionButtons();
   trialStartTime = Date.now();
   trialStartUnix = Date.now();
 
@@ -553,19 +563,50 @@ function applyViewer() {
   }
 }
 
-// One tap = answer + advance. Tapping an option (image or its checkbox
-// row) records it as `selected` (same meaning as before), shows the
-// checked checkbox + highlight for a beat so the selection visibly
-// registers, then nextTrial() records the response exactly as the old
-// select-then-Continue flow did. The zoom button stopPropagation()s, so
-// inspecting an image never answers. `advancing` blocks double-taps.
-let advancing = false;
-function onOptionTap(side) {
-  if (advancing) return;
-  advancing = true;
-  selected = side;
+// Selection model: images are for viewing (tap = zoom in the lightbox);
+// ONLY the checkbox row chooses. Submit (nextTrial) records the choice —
+// nothing auto-submits. Back pops the last recorded response and
+// re-renders that trial with its previous answer still checked, so a
+// mistake can be corrected and re-submitted.
+function toggleSelect(side) {
+  selected = (selected === side) ? null : side;
   applyViewer();
-  setTimeout(nextTrial, 500);
+  updateActionButtons();
+}
+
+function updateActionButtons() {
+  const submit = document.getElementById('btn-submit');
+  if (submit) submit.disabled = !selected;
+  const back = document.getElementById('btn-back');
+  if (back) back.disabled = currentTrial <= 0;
+}
+
+// Persist the in-progress payload (Firebase backend). Called after every
+// recorded answer AND after a Back-pop, so the locally saved copy always
+// matches the responses array, corrections included.
+function persistPending() {
+  if (BACKEND !== 'firebase') return;
+  const payloadToSave = currentPayload();
+  if (fbTransport) {
+    try { fbTransport.savePending(payloadToSave); } catch (e) { /* ignore */ }
+  } else {
+    initFirebaseTransport().then(function (t) {
+      try { t.savePending(payloadToSave); } catch (e) { /* ignore */ }
+    }).catch(function () { /* ignore */ });
+  }
+}
+
+function goBack() {
+  if (currentTrial <= 0 || responses.length === 0) return;
+  const prev = responses.pop();
+  persistPending();
+  currentTrial--;
+  showTrial(prev.chosen_side);
+}
+
+function openLightboxSource() {
+  const t = TRIALS[currentTrial];
+  if (t && t.source_image) openLightboxUrl(`${STIMULI_DIR}/${t.source_image}`);
 }
 
 // ---- Lightbox (tap/click or Esc to close; never changes the selection) ----
@@ -612,16 +653,7 @@ function nextTrial() {
     response_time_ms: rt,
     trial_start_unix_ms: trialStartUnix,
   });
-  if (BACKEND === 'firebase') {
-    const payloadToSave = currentPayload();
-    if (fbTransport) {
-      try { fbTransport.savePending(payloadToSave); } catch (e) { /* ignore */ }
-    } else {
-      initFirebaseTransport().then(function (t) {
-        try { t.savePending(payloadToSave); } catch (e) { /* ignore */ }
-      }).catch(function () { /* ignore */ });
-    }
-  }
+  persistPending();
   currentTrial++;
   showTrial();
 }
