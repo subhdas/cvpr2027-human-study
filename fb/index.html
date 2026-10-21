@@ -29,6 +29,13 @@
   .option.chosen .media-box { border-color: #007bff; }
   .option-tag { text-align: center; font-size: 14px; color: #666; margin-top: 6px; }
   .option.chosen .option-tag { color: #007bff; font-weight: 700; }
+  /* ---- explicit checkbox choice row: the visible selection control ---- */
+  .choose-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; min-height: 48px; cursor: pointer; }
+  .checkbox { width: 28px; height: 28px; flex: 0 0 auto; border: 3px solid #777; border-radius: 6px; background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 700; color: #fff; line-height: 1; }
+  .option.chosen .checkbox { background: #007bff; border-color: #007bff; }
+  .option.chosen .checkbox::after { content: '✓'; }
+  .choose-label { font-size: 16px; color: #333; }
+  .option.chosen .choose-label { color: #007bff; font-weight: 700; }
   .answer-hint { text-align: center; font-size: 14px; color: #555; margin: 2px 0 0; }
   /* ---- source (fidelity) ---- */
   .source-img { margin: 8px auto 4px; max-width: 340px; }
@@ -94,7 +101,7 @@
     </div>
     <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
     <div class="question" id="question"></div>
-    <div class="answer-hint">Tap the image you choose — that answers and moves to the next comparison. Use ⤢ to zoom without answering.</div>
+    <div class="answer-hint">Tap an image or its checkbox to answer — the box checks ✓ and moves to the next comparison. Use ⤢ to zoom without answering.</div>
   </div>
   <div id="source-container" class="source-img hidden">
     <div class="source-label">Original artwork:</div>
@@ -104,20 +111,26 @@
     </div>
   </div>
   <div class="images" id="images">
-    <div class="option" id="option-left">
-      <div class="media-box" id="box-left" onclick="onOptionTap('left')">
+    <div class="option" id="option-left" onclick="onOptionTap('left')">
+      <div class="media-box" id="box-left">
         <img id="img-left" src="" alt="Option A">
         <button type="button" class="zoom-btn" onclick="openLightboxSide('left'); event.stopPropagation();" aria-label="Zoom Option 1">⤢</button>
       </div>
-      <div class="option-tag">Option 1 — tap to choose</div>
+      <div class="choose-row">
+        <span class="checkbox" id="checkbox-left"></span>
+        <span class="choose-label">Option 1</span>
+      </div>
       <div class="ctx-thumb hidden" id="thumb-left"></div>
     </div>
-    <div class="option" id="option-right">
-      <div class="media-box" id="box-right" onclick="onOptionTap('right')">
+    <div class="option" id="option-right" onclick="onOptionTap('right')">
+      <div class="media-box" id="box-right">
         <img id="img-right" src="" alt="Option B">
         <button type="button" class="zoom-btn" onclick="openLightboxSide('right'); event.stopPropagation();" aria-label="Zoom Option 2">⤢</button>
       </div>
-      <div class="option-tag">Option 2 — tap to choose</div>
+      <div class="choose-row">
+        <span class="checkbox" id="checkbox-right"></span>
+        <span class="choose-label">Option 2</span>
+      </div>
       <div class="ctx-thumb hidden" id="thumb-right"></div>
     </div>
   </div>
@@ -506,6 +519,9 @@ function buildThumbs(t) {
       continue;
     }
     const fig = document.createElement('figure');
+    // Context interactions (incl. its zoom) must never trigger the
+    // option container's tap-to-answer handler.
+    fig.onclick = function (e) { e.stopPropagation(); };
     const box = document.createElement('div');
     box.className = 'media-box';
     box.style.aspectRatio = aspectFor(fn, '4 / 3');
@@ -537,18 +553,19 @@ function applyViewer() {
   }
 }
 
-// One tap = answer + advance. Tapping an option records it as `selected`
-// (same meaning as before), flashes the chosen highlight briefly so the
-// tap visibly registers, then nextTrial() records the response exactly as
-// the old select-then-Continue flow did. The zoom button stopPropagation()s,
-// so inspecting an image never answers. `advancing` blocks double-taps.
+// One tap = answer + advance. Tapping an option (image or its checkbox
+// row) records it as `selected` (same meaning as before), shows the
+// checked checkbox + highlight for a beat so the selection visibly
+// registers, then nextTrial() records the response exactly as the old
+// select-then-Continue flow did. The zoom button stopPropagation()s, so
+// inspecting an image never answers. `advancing` blocks double-taps.
 let advancing = false;
 function onOptionTap(side) {
   if (advancing) return;
   advancing = true;
   selected = side;
   applyViewer();
-  setTimeout(nextTrial, 240);
+  setTimeout(nextTrial, 500);
 }
 
 // ---- Lightbox (tap/click or Esc to close; never changes the selection) ----
