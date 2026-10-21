@@ -29,20 +29,16 @@
   .option.chosen .media-box { border-color: #007bff; }
   .option-tag { text-align: center; font-size: 14px; color: #666; margin-top: 6px; }
   .option.chosen .option-tag { color: #007bff; font-weight: 700; }
-  /* ---- A/B toggle (single-image layout) ---- */
-  .ab-toggle { display: flex; gap: 0; margin: 14px 0 0; border: 1.5px solid #007bff; border-radius: 8px; overflow: hidden; }
-  .ab-toggle button { flex: 1; background: #fff; color: #007bff; border: none; border-radius: 0; padding: 12px 8px; font-size: 16px; min-height: 48px; }
-  .ab-toggle button.viewing { background: #e7f1ff; font-weight: 600; }
-  .ab-toggle button.chosen { background: #007bff; color: #fff; font-weight: 700; }
+  .answer-hint { text-align: center; font-size: 14px; color: #555; margin: 2px 0 0; }
   /* ---- source (fidelity) ---- */
   .source-img { margin: 8px auto 4px; max-width: 340px; }
   .source-img .media-box { border: 2px solid #ddd; }
   .source-label { font-size: 14px; color: #666; margin-bottom: 8px; text-align: center; }
-  /* ---- fidelity context thumbnails (built only when the trial has them) ---- */
-  .thumbs { display: flex; gap: 16px; justify-content: center; margin-top: 10px; }
-  .thumbs figure { margin: 0; text-align: center; flex: 0 1 200px; }
-  .thumbs .media-box { border: 1px solid #ddd; }
-  .thumbs figcaption { font-size: 12px; color: #888; margin-top: 4px; }
+  /* ---- fidelity context thumbnail (one per option, under its crop) ---- */
+  .ctx-thumb { margin-top: 8px; }
+  .ctx-thumb figure { margin: 0; text-align: center; }
+  .ctx-thumb .media-box { border: 1px solid #ddd; }
+  .ctx-thumb figcaption { font-size: 12px; color: #888; margin-top: 4px; }
   button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 16px; cursor: pointer; min-height: 48px; }
   button:disabled { background: #ccc; }
   button:hover:not(:disabled) { background: #0056b3; }
@@ -55,15 +51,14 @@
   /* ---- lightbox ---- */
   .lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.92); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
   .lightbox img { max-width: 96vw; max-height: 96vh; object-fit: contain; }
-  /* ---- narrow screens: single full-width option + sticky header ---- */
+  /* ---- narrow screens: both options stacked full-width + sticky header ---- */
   @media (max-width: 767px) {
     body { padding: 8px; }
     .card { padding: 16px 14px; margin: 8px 0; }
     .trial-head { position: sticky; top: 0; z-index: 5; background: white; padding: 6px 0 8px; margin-top: -6px; }
     .question { font-size: 17px; }
-    .images { gap: 0; }
+    .images { flex-direction: column; gap: 22px; }
     .option { max-width: none; }
-    .option.not-viewed { display: none; }
     .source-img { max-width: 300px; }
   }
 </style>
@@ -99,6 +94,7 @@
     </div>
     <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
     <div class="question" id="question"></div>
+    <div class="answer-hint">Tap the image you choose — that answers and moves to the next comparison. Use ⤢ to zoom without answering.</div>
   </div>
   <div id="source-container" class="source-img hidden">
     <div class="source-label">Original artwork:</div>
@@ -107,29 +103,23 @@
       <button type="button" class="zoom-btn" id="zoom-source" aria-label="Zoom original artwork">⤢</button>
     </div>
   </div>
-  <div class="ab-toggle hidden" id="ab-toggle">
-    <button type="button" id="toggle-left" onclick="viewOption('left')">Option 1</button>
-    <button type="button" id="toggle-right" onclick="viewOption('right')">Option 2</button>
-  </div>
   <div class="images" id="images">
     <div class="option" id="option-left">
       <div class="media-box" id="box-left" onclick="onOptionTap('left')">
         <img id="img-left" src="" alt="Option A">
         <button type="button" class="zoom-btn" onclick="openLightboxSide('left'); event.stopPropagation();" aria-label="Zoom Option 1">⤢</button>
       </div>
-      <div class="option-tag">Option 1</div>
+      <div class="option-tag">Option 1 — tap to choose</div>
+      <div class="ctx-thumb hidden" id="thumb-left"></div>
     </div>
     <div class="option" id="option-right">
       <div class="media-box" id="box-right" onclick="onOptionTap('right')">
         <img id="img-right" src="" alt="Option B">
         <button type="button" class="zoom-btn" onclick="openLightboxSide('right'); event.stopPropagation();" aria-label="Zoom Option 2">⤢</button>
       </div>
-      <div class="option-tag">Option 2</div>
+      <div class="option-tag">Option 2 — tap to choose</div>
+      <div class="ctx-thumb hidden" id="thumb-right"></div>
     </div>
-  </div>
-  <div id="thumbs-container" class="thumbs hidden"></div>
-  <div style="text-align: center; margin-top: 16px;">
-    <button id="btn-next" onclick="nextTrial()" disabled>Select an image above, then continue</button>
   </div>
 </div>
 
@@ -423,16 +413,11 @@ function startStudy() {
   showTrial();
 }
 
-// ---- Comparison viewer (dual side-by-side / single A-B) ----
+// ---- Comparison viewer ----
 // Presentation only: `selected` keeps its original meaning (the side the
 // participant chose) and nextTrial() records from it exactly as before.
-let viewSide = 'left';
 const imgMeta = {};    // filename -> {w, h} once loaded (for aspect boxes)
 const imgPreload = {}; // filename -> HTMLImageElement
-
-function isSingleLayout() {
-  return window.matchMedia('(max-width: 767px)').matches;
-}
 
 function preloadFile(fn) {
   if (!fn || imgPreload[fn]) return;
@@ -498,10 +483,8 @@ function showTrial() {
   buildThumbs(t);
 
   selected = null;
-  viewSide = 'left';
+  advancing = false;
   applyViewer();
-  document.getElementById('btn-next').disabled = true;
-  document.getElementById('btn-next').textContent = 'Select an image above, then continue';
   trialStartTime = Date.now();
   trialStartUnix = Date.now();
 
@@ -509,84 +492,63 @@ function showTrial() {
   if (currentTrial + 1 < TRIALS.length) preloadTrial(TRIALS[currentTrial + 1]);
 }
 
-// Build the fidelity context thumbnails ONLY for trials that actually
-// carry them — realism trials never get thumbnail elements (previously a
-// CSS specificity bug left the empty thumbnail row visible with
-// broken-image glyphs under every realism comparison).
+// Build each fidelity context thumbnail under its OWN option's crop, so
+// the context can never be mistaken for a third/fourth choice (the old
+// separate side-by-side thumb row read as extra options). Realism trials
+// carry no thumbs and get no elements at all.
 function buildThumbs(t) {
-  const container = document.getElementById('thumbs-container');
-  container.innerHTML = '';
-  if (!(t.left_thumb && t.right_thumb)) {
-    container.classList.add('hidden');
-    return;
-  }
-  const pair = [[t.left_thumb, 'Full scene, left option'],
-                [t.right_thumb, 'Full scene, right option']];
-  for (const [fn, alt] of pair) {
+  for (const side of ['left', 'right']) {
+    const container = document.getElementById('thumb-' + side);
+    container.innerHTML = '';
+    const fn = side === 'left' ? t.left_thumb : t.right_thumb;
+    if (!fn) {
+      container.classList.add('hidden');
+      continue;
+    }
     const fig = document.createElement('figure');
     const box = document.createElement('div');
     box.className = 'media-box';
     box.style.aspectRatio = aspectFor(fn, '4 / 3');
     const img = document.createElement('img');
-    img.alt = alt;
-    img.onerror = function () { fig.style.display = 'none'; };
+    img.alt = 'Full scene for this option (context only)';
+    img.onerror = function () { container.classList.add('hidden'); };
     img.src = `${STIMULI_DIR}/${fn}`;
     const zoom = document.createElement('button');
     zoom.type = 'button';
     zoom.className = 'zoom-btn';
     zoom.textContent = '⤢';
-    zoom.setAttribute('aria-label', 'Zoom: ' + alt);
+    zoom.setAttribute('aria-label', 'Zoom: full scene for this option');
     zoom.onclick = function () { openLightboxUrl(`${STIMULI_DIR}/${fn}`); };
     box.appendChild(img);
     box.appendChild(zoom);
     const cap = document.createElement('figcaption');
-    cap.textContent = 'Full scene (context)';
+    cap.textContent = 'Full scene (context only)';
     fig.appendChild(box);
     fig.appendChild(cap);
     container.appendChild(fig);
+    container.classList.remove('hidden');
   }
-  container.classList.remove('hidden');
 }
 
 function applyViewer() {
-  const single = isSingleLayout();
-  document.getElementById('ab-toggle').classList.toggle('hidden', !single);
   for (const side of ['left', 'right']) {
     document.getElementById('option-' + side).classList.toggle(
-      'not-viewed', single && side !== viewSide);
-    document.getElementById('option-' + side).classList.toggle(
       'chosen', selected === side);
-    const tg = document.getElementById('toggle-' + side);
-    tg.classList.toggle('viewing', single && side === viewSide && selected !== side);
-    tg.classList.toggle('chosen', single && selected === side);
   }
 }
 
-function markSelected(side) {
-  selected = side;
-  document.getElementById('btn-next').disabled = false;
-  document.getElementById('btn-next').textContent = 'Continue →';
-  applyViewer();
-}
-
-function selectImage(side) {
-  markSelected(side);
-}
-
-// Single layout: show one option full-width and choose it. Reached from
-// the Option 1 / Option 2 toggle and by tapping the displayed image
-// (which flips to the other option).
-function viewOption(side) {
-  viewSide = side;
-  markSelected(side);
-}
-
+// One tap = answer + advance. Tapping an option records it as `selected`
+// (same meaning as before), flashes the chosen highlight briefly so the
+// tap visibly registers, then nextTrial() records the response exactly as
+// the old select-then-Continue flow did. The zoom button stopPropagation()s,
+// so inspecting an image never answers. `advancing` blocks double-taps.
+let advancing = false;
 function onOptionTap(side) {
-  if (isSingleLayout()) {
-    viewOption(side === 'left' ? 'right' : 'left');
-    return;
-  }
-  selectImage(side);
+  if (advancing) return;
+  advancing = true;
+  selected = side;
+  applyViewer();
+  setTimeout(nextTrial, 240);
 }
 
 // ---- Lightbox (tap/click or Esc to close; never changes the selection) ----
